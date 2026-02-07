@@ -1,0 +1,40 @@
+{
+  "name": "claude-auditor",
+  "version": "1.0.0",
+  "description": "Real-time AI session auditor for Claude Code — wraps sessions in a PTY proxy with live critical analysis",
+  "type": "module",
+  "main": "src/cli.js",
+  "bin": {
+    "claude-auditor": "./bin/claude-auditor.js"
+  },
+  "scripts": {
+    "start": "node bin/claude-auditor.js",
+    "test": "node --test test/*.test.js",
+    "lint": "eslint src/ bin/"
+  },
+  "keywords": [
+    "claude",
+    "claude-code",
+    "auditor",
+    "code-review",
+    "ai",
+    "pty",
+    "terminal"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "commander": "^12.0.0",
+    "node-pty": "^1.0.0",
+    "strip-ansi": "^7.1.0",
+    "uuid": "^10.0.0"
+  },
+  "devDependencies": {},
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/claude-auditor/claude-auditor"
+  }
+}

@@ -1,5 +1,14 @@
 import { EventEmitter } from 'events';
+import { execSync } from 'child_process';
 import pty from 'node-pty';
+
+function resolveCommand(cmd) {
+  try {
+    return execSync(`which ${cmd}`, { encoding: 'utf-8' }).trim();
+  } catch {
+    return cmd;
+  }
+}
 
 export function createProxy(config) {
   const emitter = new EventEmitter();
@@ -9,8 +18,11 @@ export function createProxy(config) {
   const cols = process.stdout.columns || 80;
   const rows = process.stdout.rows || 24;
 
+  // Resolve full path — node-pty requires it on some platforms
+  const claudePath = resolveCommand('claude');
+
   // Spawn claude in a PTY
-  const ptyProcess = pty.spawn('claude', claudeArgs, {
+  const ptyProcess = pty.spawn(claudePath, claudeArgs, {
     name: process.env.TERM || 'xterm-256color',
     cols,
     rows,

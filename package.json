@@ -25,11 +25,10 @@
   "license": "MIT",
   "dependencies": {
     "commander": "^12.0.0",
-    "node-pty": "^1.0.0",
+    "node-pty": "^1.2.0-beta.10",
     "strip-ansi": "^7.1.0",
     "uuid": "^10.0.0"
   },
-  "devDependencies": {},
   "engines": {
     "node": ">=18.0.0"
   },

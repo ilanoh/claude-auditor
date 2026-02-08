@@ -162,6 +162,7 @@ export function createAuditor(config, systemPrompt) {
       const response = await callClaude(prompt);
       const parsed = parseResponse(response);
 
+      log(`Chunk #${chunk.id} response: ${response.slice(0, 300)}`);
       log(`Chunk #${chunk.id}: ${parsed.findings.length} findings, cost: $${totalCost.toFixed(4)}`);
 
       // Check budget

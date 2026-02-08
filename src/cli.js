@@ -73,6 +73,17 @@ export function run(argv) {
 }
 
 function startSession(config) {
+  // Open split pane BEFORE starting the proxy (proxy sets raw mode on stdin)
+  let pane = null;
+  if (config.openPane) {
+    pane = openAuditorPane(config.logPath);
+    if (pane) {
+      log('pane', 'Auditor pane opened');
+    } else {
+      log('pane', 'Could not auto-open pane — tail -f ' + config.logPath);
+    }
+  }
+
   const systemPrompt = buildSystemPrompt(config.focusAreas);
   const display = createDisplay();
   const reporter = createReporter(config);
@@ -80,17 +91,6 @@ function startSession(config) {
   const auditor = createAuditor(config, systemPrompt);
   const proxy = createProxy(config);
   const supervisor = createSupervisor(config, proxy, auditor, display);
-
-  // Auto-open split pane for live auditor output
-  let pane = null;
-  if (config.openPane) {
-    pane = openAuditorPane(config.logPath);
-    if (pane) {
-      log('pane', 'Auditor pane opened');
-    } else {
-      log('pane', 'Could not auto-open pane');
-    }
-  }
 
   let auditConsole = null;
   if (config.autonomy === 'supervised' && config.mode === 'active') {

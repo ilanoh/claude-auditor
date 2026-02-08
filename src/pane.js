@@ -1,37 +1,31 @@
-import { execSync, spawn } from 'child_process';
+import { execSync, spawn, execFileSync } from 'child_process';
+import { writeFileSync, chmodSync } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
 
 /**
- * Auto-open a split terminal pane that tails the audit log.
- * Supports: tmux, iTerm2, Terminal.app, Ghostty, Kitty.
- * Returns a cleanup function that closes the pane on exit.
+ * Auto-open a split/second terminal pane showing the audit log.
+ * Strategy:
+ *   1. tmux → native split pane (best)
+ *   2. macOS → open a new terminal window via `open -a Terminal` with a script
+ *   3. Linux → try common terminal emulators
  */
 export function openAuditorPane(logPath) {
-  // tmux — best experience, native split
+  // Already in tmux → split pane
   if (process.env.TMUX) {
     return openTmuxPane(logPath);
   }
 
-  // iTerm2
-  if (process.env.TERM_PROGRAM === 'iTerm.app') {
-    return openItermPane(logPath);
-  }
-
-  // Ghostty
-  if (process.env.TERM_PROGRAM === 'ghostty') {
-    return openGhosttyPane(logPath);
-  }
-
-  // Kitty
-  if (process.env.TERM_PROGRAM === 'kitty') {
-    return openKittyPane(logPath);
-  }
-
-  // macOS Terminal.app — fallback
+  // macOS — works with ANY terminal (opens a separate Terminal.app window)
   if (process.platform === 'darwin') {
-    return openTerminalTab(logPath);
+    return openMacPane(logPath);
   }
 
-  // No supported terminal detected — no pane
+  // Linux — try common terminals
+  if (process.platform === 'linux') {
+    return openLinuxPane(logPath);
+  }
+
   return null;
 }
 
@@ -52,70 +46,54 @@ function openTmuxPane(logPath) {
   }
 }
 
-function openItermPane(logPath) {
+function openMacPane(logPath) {
   try {
-    const script = `
-      tell application "iTerm2"
-        tell current session of current window
-          set newSession to (split vertically with default profile)
-          tell newSession
-            write text "tail -f '${logPath}' && exit"
-          end tell
-        end tell
-      end tell
-    `;
-    execSync(`osascript -e '${script.replace(/'/g, "'\\''")}'`);
+    // Write a small shell script that tails the log with a nice header
+    const scriptPath = join(tmpdir(), `claude-auditor-tail-${process.pid}.sh`);
+    writeFileSync(scriptPath, [
+      '#!/bin/bash',
+      'clear',
+      'printf "\\033[1;36m── Claude Auditor ──\\033[0m\\n\\n"',
+      `tail -f "${logPath}"`,
+    ].join('\n'), 'utf-8');
+    chmodSync(scriptPath, 0o755);
 
-    return {
-      close() {
-        // iTerm will close when tail ends (session exits)
-      }
-    };
-  } catch {
-    return null;
-  }
-}
-
-function openGhosttyPane(logPath) {
-  try {
-    // Ghostty supports new-tab via CLI or keybind, but not split via CLI.
-    // Fall back to new window
-    spawn('ghostty', ['-e', `tail -f '${logPath}'`], {
+    // `open -a Terminal <script>` works regardless of what terminal the user runs claude-auditor in
+    spawn('open', ['-a', 'Terminal', scriptPath], {
       detached: true,
       stdio: 'ignore',
     }).unref();
 
-    return { close() {} };
-  } catch {
-    return null;
-  }
-}
-
-function openKittyPane(logPath) {
-  try {
-    execSync(`kitty @ launch --type=window tail -f '${logPath}'`);
-    return { close() {} };
-  } catch {
-    return null;
-  }
-}
-
-function openTerminalTab(logPath) {
-  try {
-    const script = `
-      tell application "Terminal"
-        activate
-        do script "tail -f '${logPath}'"
-      end tell
-    `;
-    execSync(`osascript -e '${script.replace(/'/g, "'\\''")}'`);
-
     return {
       close() {
-        // Can't easily close Terminal.app tabs programmatically
+        // Terminal.app window will stay open (user closes manually)
+        // Clean up the temp script
+        try { execSync(`rm -f "${scriptPath}" 2>/dev/null`); } catch {}
       }
     };
   } catch {
     return null;
   }
+}
+
+function openLinuxPane(logPath) {
+  // Try common Linux terminal emulators in order of popularity
+  const terminals = [
+    { cmd: 'gnome-terminal', args: ['--', 'tail', '-f', logPath] },
+    { cmd: 'konsole', args: ['-e', 'tail', '-f', logPath] },
+    { cmd: 'xfce4-terminal', args: ['-e', `tail -f "${logPath}"`] },
+    { cmd: 'xterm', args: ['-e', 'tail', '-f', logPath] },
+  ];
+
+  for (const { cmd, args } of terminals) {
+    try {
+      execSync(`which ${cmd}`, { stdio: 'ignore' });
+      spawn(cmd, args, { detached: true, stdio: 'ignore' }).unref();
+      return { close() {} };
+    } catch {
+      continue;
+    }
+  }
+
+  return null;
 }

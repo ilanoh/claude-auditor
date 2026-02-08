@@ -1,5 +1,5 @@
 import { EventEmitter } from 'events';
-import { execFile } from 'child_process';
+import { spawn } from 'child_process';
 import { v4 as uuidv4 } from 'uuid';
 import { log as fileLog } from './logger.js';
 
@@ -82,35 +82,57 @@ export function createAuditor(config, systemPrompt) {
       ];
 
       if (systemPrompt) {
-        args.push('--system-prompt', systemPrompt);
+        args.push('--append-system-prompt', systemPrompt);
       }
 
       log(`Calling claude with session ${sessionId}`);
 
-      execFile('claude', args, {
-        timeout: 120000,
-        maxBuffer: 10 * 1024 * 1024,
+      const proc = spawn('claude', args, {
+        stdio: ['pipe', 'pipe', 'pipe'],
         env: process.env,
-      }, (err, stdout, stderr) => {
-        if (err) {
-          log(`Claude call failed: ${err.message}`);
-          reject(err);
+      });
+
+      // Close stdin immediately — claude -p hangs if stdin stays open
+      proc.stdin.end();
+
+      let stdout = '';
+      let stderr = '';
+
+      proc.stdout.on('data', (data) => { stdout += data; });
+      proc.stderr.on('data', (data) => { stderr += data; });
+
+      // Timeout: kill if it takes too long
+      const timer = setTimeout(() => {
+        proc.kill('SIGTERM');
+        log(`Claude call timed out after 60s`);
+        reject(new Error('Auditor call timed out'));
+      }, 60000);
+
+      proc.on('close', (code) => {
+        clearTimeout(timer);
+
+        if (code !== 0) {
+          log(`Claude exited with code ${code}: ${stderr.slice(0, 200)}`);
+          reject(new Error(`claude exited with code ${code}`));
           return;
         }
 
         try {
           const json = JSON.parse(stdout);
-          // Extract cost if available
-          if (json.cost_usd !== undefined) {
-            totalCost += json.cost_usd;
+          if (json.total_cost_usd !== undefined) {
+            totalCost += json.total_cost_usd;
           }
-          // The result text is in json.result or json.text
           const text = json.result || json.text || json.content || stdout;
           resolve(typeof text === 'string' ? text : JSON.stringify(text));
         } catch {
-          // Not JSON, use raw output
           resolve(stdout);
         }
+      });
+
+      proc.on('error', (err) => {
+        clearTimeout(timer);
+        log(`Claude spawn failed: ${err.message}`);
+        reject(err);
       });
     });
   }

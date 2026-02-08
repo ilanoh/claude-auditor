@@ -37,12 +37,13 @@ function openTmuxPane(logPath) {
 function openItermPane(logPath) {
   try {
     // Split, run tail, then refocus original pane
+    const tailCmd = `clear && echo '── Claude Auditor ──' && tail -f ${logPath}`;
     const script =
 `tell application "iTerm2"
   tell current session of current window
     set auditorSession to (split vertically with default profile)
     tell auditorSession
-      write text "clear && printf '\\033[1;36m── Claude Auditor ──\\033[0m\\n' && tail -f '${logPath}'"
+      write text "${tailCmd}"
     end tell
   end tell
 end tell`;

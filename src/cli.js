@@ -7,6 +7,8 @@ import { createDisplay } from './display.js';
 import { createReporter } from './reporter.js';
 import { createConsole } from './console.js';
 import { buildSystemPrompt } from './prompts/base.js';
+import { initLogger, log } from './logger.js';
+import { openAuditorPane } from './pane.js';
 
 export function run(argv) {
   const program = new Command();
@@ -23,8 +25,9 @@ export function run(argv) {
     .option('--max-budget <usd>', 'Max auditor spend in USD', parseFloat, 1.0)
     .option('--chunk-interval <seconds>', 'Time-based chunk flush interval', parseInt, 30)
     .option('--autonomy <level>', 'Autonomy level: full, supervised, observe', 'supervised')
-    .option('--verbose', 'Show auditor activity in stderr', false)
+    .option('--verbose', 'Show auditor activity in log', false)
     .option('--no-report', 'Skip final report generation')
+    .option('--no-pane', 'Don\'t auto-open auditor pane', false)
     .allowUnknownOption(true)
     .allowExcessArguments(true);
 
@@ -58,24 +61,36 @@ export function run(argv) {
     autonomy: opts.autonomy,
     verbose: opts.verbose,
     generateReport: opts.report !== false,
+    openPane: opts.pane !== false,
     claudeArgs,
   };
 
-  if (config.verbose) {
-    process.stderr.write(`[auditor] Config: ${JSON.stringify(config, null, 2)}\n`);
-  }
+  // Initialize logger FIRST — all output goes to log file, never stderr
+  initLogger(logPath);
+  log('config', JSON.stringify(config));
 
   startSession(config);
 }
 
 function startSession(config) {
   const systemPrompt = buildSystemPrompt(config.focusAreas);
-  const display = createDisplay(config);
+  const display = createDisplay();
   const reporter = createReporter(config);
   const chunker = createChunker(config);
   const auditor = createAuditor(config, systemPrompt);
   const proxy = createProxy(config);
   const supervisor = createSupervisor(config, proxy, auditor, display);
+
+  // Auto-open split pane for live auditor output
+  let pane = null;
+  if (config.openPane) {
+    pane = openAuditorPane(config.logPath);
+    if (pane) {
+      log('pane', 'Auditor pane opened');
+    } else {
+      log('pane', 'Could not auto-open pane');
+    }
+  }
 
   let auditConsole = null;
   if (config.autonomy === 'supervised' && config.mode === 'active') {
@@ -113,12 +128,19 @@ function startSession(config) {
     display.logAction('RESOLVED', 'Worker back on track', false);
   });
 
+  const startTime = Date.now();
+  let exiting = false;
+
   // Wire: proxy exit → final report
   proxy.on('exit', async (exitInfo) => {
+    if (exiting) return;
+    exiting = true;
+
     chunker.flush();
 
-    // Wait for any pending auditor analysis
-    await auditor.drain();
+    // Wait for pending auditor analysis — with timeout so we don't hang
+    const drainTimeout = new Promise(r => setTimeout(r, 5000));
+    await Promise.race([auditor.drain(), drainTimeout]);
 
     if (config.generateReport) {
       const report = reporter.generate({
@@ -135,34 +157,40 @@ function startSession(config) {
       try {
         const fs = await import('fs');
         fs.writeFileSync(config.outputPath, report, 'utf-8');
-        process.stderr.write(`\n[auditor] Report written to ${config.outputPath}\n`);
+        log('report', `Written to ${config.outputPath}`);
       } catch (err) {
-        process.stderr.write(`\n[auditor] Failed to write report: ${err.message}\n`);
+        log('report', `Failed to write: ${err.message}`);
       }
     }
 
-    if (auditConsole) {
-      auditConsole.close();
-    }
+    if (auditConsole) auditConsole.close();
+    if (pane) pane.close();
 
-    process.stderr.write(`[auditor] Session ended. Findings: ${display.getFindings().length}\n`);
+    log('session', `Ended. Findings: ${display.getFindings().length}`);
+
+    // Force exit — don't let pending promises keep the process alive
     process.exit(exitInfo.exitCode || 0);
   });
 
-  const startTime = Date.now();
-
-  // Graceful shutdown
-  const shutdown = () => {
-    process.stderr.write('\n[auditor] Shutting down...\n');
+  // Graceful shutdown — Ctrl+C in raw mode sends 0x03 to the PTY child,
+  // but if the child exits, onExit handles cleanup.
+  // If somehow SIGINT reaches us, handle it:
+  let sigintCount = 0;
+  process.on('SIGINT', () => {
+    sigintCount++;
+    if (sigintCount >= 2) {
+      // Force kill on double Ctrl+C
+      if (pane) pane.close();
+      process.exit(1);
+    }
     chunker.flush();
     proxy.kill();
-  };
+  });
 
-  process.on('SIGINT', shutdown);
-  process.on('SIGTERM', shutdown);
+  process.on('SIGTERM', () => {
+    chunker.flush();
+    proxy.kill();
+  });
 
-  if (config.verbose) {
-    process.stderr.write(`[auditor] Session started. Log: ${config.logPath}\n`);
-    process.stderr.write(`[auditor] Autonomy: ${config.autonomy} | Mode: ${config.mode}\n`);
-  }
+  log('session', `Started. Autonomy: ${config.autonomy} | Mode: ${config.mode}`);
 }

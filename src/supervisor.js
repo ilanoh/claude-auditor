@@ -1,4 +1,5 @@
 import { EventEmitter } from 'events';
+import { log as fileLog } from './logger.js';
 
 const STATES = {
   MONITORING: 'MONITORING',
@@ -11,7 +12,6 @@ const STATES = {
 export function createSupervisor(config, proxy, auditor, display) {
   const emitter = new EventEmitter();
   const autonomy = config.autonomy || 'supervised';
-  const verbose = config.verbose || false;
 
   let state = STATES.MONITORING;
   let recalibrationTurn = 0;
@@ -20,9 +20,7 @@ export function createSupervisor(config, proxy, auditor, display) {
   let workerResponseTimer = null;
 
   function log(msg) {
-    if (verbose) {
-      process.stderr.write(`[supervisor] [${state}] ${msg}\n`);
-    }
+    fileLog(`supervisor:${state}`, msg);
   }
 
   function setState(newState) {

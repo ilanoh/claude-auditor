@@ -1,6 +1,7 @@
 import { EventEmitter } from 'events';
 import { execFile } from 'child_process';
 import { v4 as uuidv4 } from 'uuid';
+import { log as fileLog } from './logger.js';
 
 // Directive patterns in auditor responses
 const FINDING_RE = /\[FINDING:(CRITICAL|WARNING|INFO|SUGGESTION)\]\s*(.+)/g;
@@ -14,7 +15,6 @@ export function createAuditor(config, systemPrompt) {
   const sessionId = uuidv4();
   const model = config.auditorModel || 'sonnet';
   const maxBudget = config.maxBudget || 1.0;
-  const verbose = config.verbose || false;
 
   let totalCost = 0;
   let budgetExceeded = false;
@@ -23,9 +23,7 @@ export function createAuditor(config, systemPrompt) {
   let drainResolve = null;
 
   function log(msg) {
-    if (verbose) {
-      process.stderr.write(`[auditor-brain] ${msg}\n`);
-    }
+    fileLog('auditor-brain', msg);
   }
 
   function parseResponse(text) {
@@ -147,7 +145,7 @@ export function createAuditor(config, systemPrompt) {
       // Check budget
       if (totalCost >= maxBudget) {
         budgetExceeded = true;
-        process.stderr.write(`[auditor] Budget limit reached ($${totalCost.toFixed(2)}/$${maxBudget}). Stopping analysis.\n`);
+        fileLog('BUDGET', `Budget limit reached ($${totalCost.toFixed(2)}/$${maxBudget}). Stopping analysis.`);
       }
 
       chunkResolve(parsed);

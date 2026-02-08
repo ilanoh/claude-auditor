@@ -27,7 +27,7 @@ export function run(argv) {
     .option('--autonomy <level>', 'Autonomy level: full, supervised, observe', 'supervised')
     .option('--verbose', 'Show auditor activity in log', false)
     .option('--no-report', 'Skip final report generation')
-    .option('--no-pane', 'Don\'t auto-open auditor pane', false)
+    .option('--no-pane', 'Don\'t auto-open auditor pane')
     .allowUnknownOption(true)
     .allowExcessArguments(true);
 

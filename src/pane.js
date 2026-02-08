@@ -36,7 +36,7 @@ function openTmuxPane(logPath) {
 
 function openItermPane(logPath) {
   try {
-    // Split, run tail, then refocus original pane
+    // Split and capture the new session's ID
     const tailCmd = `clear && echo '── Claude Auditor ──' && tail -f ${logPath}`;
     const script =
 `tell application "iTerm2"
@@ -44,11 +44,15 @@ function openItermPane(logPath) {
     set auditorSession to (split vertically with default profile)
     tell auditorSession
       write text "${tailCmd}"
+      return id
     end tell
   end tell
 end tell`;
 
-    execFileSync('osascript', ['-e', script], { encoding: 'utf-8', timeout: 5000 });
+    const sessionId = execFileSync('osascript', ['-e', script], {
+      encoding: 'utf-8',
+      timeout: 5000,
+    }).trim();
 
     // Refocus the left (original) pane so the user stays in claude
     const focusScript =
@@ -62,17 +66,21 @@ end tell`;
 
     return {
       close() {
+        if (!sessionId) return;
         try {
+          // Close the specific auditor session by ID
           const closeScript =
 `tell application "iTerm2"
-  tell current tab of current window
-    set sessionCount to count of sessions
-    if sessionCount > 1 then
-      tell last session
-        close
-      end tell
-    end if
-  end tell
+  repeat with w in windows
+    repeat with t in tabs of w
+      repeat with s in sessions of t
+        if id of s is "${sessionId}" then
+          tell s to close
+          return
+        end if
+      end repeat
+    end repeat
+  end repeat
 end tell`;
           execFileSync('osascript', ['-e', closeScript], { timeout: 5000 });
         } catch {}

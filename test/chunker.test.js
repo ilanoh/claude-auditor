@@ -13,17 +13,16 @@ describe('Chunker', () => {
   });
 
   it('should emit a chunk on manual flush', () => {
-    chunker.feed('Hello world\nThis is a test\n');
+    chunker.feed('Hello world this is a test line\nSecond line of content here\nThird line of real content\n');
     chunker.flush();
 
     assert.equal(chunks.length, 1);
     assert.equal(chunks[0].id, 1);
     assert.ok(chunks[0].content.includes('Hello world'));
-    assert.ok(chunks[0].content.includes('This is a test'));
   });
 
   it('should strip ANSI codes from content', () => {
-    chunker.feed('\x1b[31mRed text\x1b[0m and \x1b[1mbold\x1b[0m\n');
+    chunker.feed('\x1b[31mRed text with some content\x1b[0m\nAnother line of output here\nThird line for minimum\n');
     chunker.flush();
 
     assert.equal(chunks.length, 1);
@@ -32,16 +31,14 @@ describe('Chunker', () => {
   });
 
   it('should flush when buffer exceeds size cap (200 lines)', () => {
-    // Feed 250 non-empty lines
-    const lines = Array.from({ length: 250 }, (_, i) => `Line ${i + 1}`).join('\n') + '\n';
+    const lines = Array.from({ length: 250 }, (_, i) => `Line ${i + 1} with enough content to not be filtered`).join('\n') + '\n';
     chunker.feed(lines);
 
-    // Should have flushed at least once due to size cap
     assert.ok(chunks.length >= 1, `Expected at least 1 chunk, got ${chunks.length}`);
   });
 
   it('should detect tool patterns in chunks', () => {
-    chunker.feed('  Read file /src/index.js\n  Contents of file...\n');
+    chunker.feed('  Read file /src/index.js\n  Contents of file here...\n  More file content below\n  const x = 1\n');
     chunker.flush();
 
     assert.equal(chunks.length, 1);
@@ -49,21 +46,18 @@ describe('Chunker', () => {
   });
 
   it('should detect boundary patterns and split chunks', () => {
-    // Feed content with a boundary in the middle
-    // Need > 5 lines before boundary to trigger flush
-    chunker.feed('Line 1\nLine 2\nLine 3\nLine 4\nLine 5\nLine 6\n');
+    chunker.feed('Line 1 with content\nLine 2 with content\nLine 3 with content\nLine 4 with content\nLine 5 with content\nLine 6 with content\n');
     chunker.feed('───────────────────\n');
-    chunker.feed('After boundary\n');
+    chunker.feed('After boundary line one\nAfter boundary line two\nAfter boundary line three\n');
     chunker.flush();
 
-    // Should have 2 chunks: before boundary and boundary + after
     assert.ok(chunks.length >= 2, `Expected at least 2 chunks, got ${chunks.length}`);
   });
 
   it('should assign incrementing chunk IDs', () => {
-    chunker.feed('First chunk\n');
+    chunker.feed('First chunk line one content\nFirst chunk line two content\nFirst chunk line three\n');
     chunker.flush();
-    chunker.feed('Second chunk\n');
+    chunker.feed('Second chunk line one content\nSecond chunk line two content\nSecond chunk line three\n');
     chunker.flush();
 
     assert.equal(chunks[0].id, 1);
@@ -71,14 +65,14 @@ describe('Chunker', () => {
   });
 
   it('should not emit empty chunks', () => {
-    chunker.flush(); // Nothing in buffer
+    chunker.flush();
     assert.equal(chunks.length, 0);
   });
 
   it('should track stats correctly', () => {
-    chunker.feed('Line 1\nLine 2\n  Read file test\n');
+    chunker.feed('Line 1 content here\nLine 2 content here\n  Read file test content\n');
     chunker.flush();
-    chunker.feed('Line 3\n  Bash command\n');
+    chunker.feed('Line 3 content here\n  Bash command running\nLine 4 output content\n');
     chunker.flush();
 
     const stats = chunker.getStats();
@@ -89,21 +83,25 @@ describe('Chunker', () => {
   });
 
   it('should include timestamp in chunks', () => {
-    chunker.feed('Test line\n');
+    chunker.feed('Test line with enough content\nAnother test line here\nThird test line present\n');
     chunker.flush();
 
     assert.ok(chunks[0].timestamp);
-    // Should be a valid ISO string
     assert.ok(!isNaN(Date.parse(chunks[0].timestamp)));
   });
 
-  it('should skip empty lines', () => {
-    chunker.feed('\n\n\nActual content\n\n\n');
+  it('should filter out tiny noise chunks', () => {
+    chunker.feed('hi\n');
     chunker.flush();
 
-    assert.equal(chunks.length, 1);
-    assert.ok(chunks[0].content.includes('Actual content'));
-    // lineCount should reflect non-empty lines
-    assert.equal(chunks[0].lineCount, 1);
+    // Single short line should be filtered
+    assert.equal(chunks.length, 0);
+  });
+
+  it('should filter out terminal noise lines', () => {
+    chunker.feed('Puzzling...\nUpdate available! Run: brew upgrade\n│ some box content\n');
+    chunker.flush();
+
+    assert.equal(chunks.length, 0);
   });
 });

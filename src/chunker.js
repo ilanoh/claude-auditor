@@ -23,8 +23,21 @@ const TOOL_PATTERNS = {
   Task: /\b(Task|Agent|Spawning)\s/i,
 };
 
+// Lines that are just terminal noise — skip these entirely
+const NOISE_PATTERNS = [
+  /^[│┃|]/,                          // Box drawing verticals
+  /^[╭╮╰╯┌┐└┘]/,                    // Box corners alone
+  /^\s*[.·…]+\s*$/,                  // Loading dots
+  /^\s*$/,                            // Whitespace
+  /^Puzzling/,                        // Claude thinking indicator
+  /^\s*\d+\s*$/,                      // Just a number
+  /^Update available/,                // Update notice
+  /^brew upgrade/,                    // Brew suggestion
+];
+
 const SIZE_CAP = 200;       // Max lines before forced flush
-const DEBOUNCE_MS = 2000;   // Flush after output stops for 2s
+const DEBOUNCE_MS = 5000;   // Flush after output stops for 5s
+const MIN_LINES = 3;        // Don't emit chunks smaller than this
 
 export function createChunker(config) {
   const emitter = new EventEmitter();
@@ -38,7 +51,6 @@ export function createChunker(config) {
 
   let debounceTimer = null;
   let intervalTimer = null;
-  let pendingBoundary = false;
 
   function detectTools(lines) {
     const tools = new Set();
@@ -52,6 +64,10 @@ export function createChunker(config) {
     return [...tools];
   }
 
+  function isNoise(line) {
+    return NOISE_PATTERNS.some(p => p.test(line));
+  }
+
   function isBoundary(line) {
     return BOUNDARY_PATTERNS.some(p => p.test(line));
   }
@@ -61,7 +77,13 @@ export function createChunker(config) {
 
     const lines = buffer.slice();
     buffer = [];
-    pendingBoundary = false;
+
+    // Filter: don't emit tiny chunks of noise
+    if (lines.length < MIN_LINES) {
+      // Check if it has any substance
+      const hasSubstance = lines.some(l => l.trim().length > 20);
+      if (!hasSubstance) return;
+    }
 
     chunkId++;
     totalChunks++;
@@ -106,11 +128,12 @@ export function createChunker(config) {
       const trimmed = line.trim();
       if (!trimmed) continue;
 
+      // Skip terminal noise
+      if (isNoise(trimmed)) continue;
+
       // Check if this line is a boundary
       if (isBoundary(trimmed) && buffer.length > 5) {
-        // Flush what we have before this boundary
         doFlush();
-        pendingBoundary = true;
       }
 
       buffer.push(line);

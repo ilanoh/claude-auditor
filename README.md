@@ -159,7 +159,7 @@ This ensures the auditor sees complete tool interactions rather than arbitrary t
 
 ## Requirements
 
-- Node.js >= 18
+- Node.js >= 26
 - `claude` CLI installed and available in PATH
 
 ## License
